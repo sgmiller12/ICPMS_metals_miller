@@ -8,6 +8,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 library(tidyverse)
 library(readr)
+library(janitor)
 
 ICPMS_Data <- read_csv("data/ICPMS_Data.csv", skip=1, na = "N/A")
 view(ICPMS_Data)
@@ -48,22 +49,23 @@ all(RSD_data$`Sample Key`==ICPMS_tidy$`Sample Key`,RSD_data$metal==ICPMS_tidy$me
 merged_ICPMS <- merge(ICPMS_tidy,Sample_Key)
 view(merged_ICPMS)
 
+write.csv(merged_ICPMS, file = "~/CHEM313_Miller/ICPMS_metals_miller/data/tidy_ICPMS.csv")
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
 ### Tidying process for Cr AA_data:
 AA_Data <- read_csv("data/AA_Data.csv",skip=4,na = "N/A")
 view(AA_Data)
 
-AA_RSD <- AA_Data %>%
-  gather(`%RSD`, key = "Sample",value = "RSD") 
+AA_merged <- merge(AA_Data,Sample_Key)
+view(AA_merged) ### note to self: this should produce 65 observations if everything is retained properly
 
-AA_tidy <- AA_Data %/%
-  gather(X2, key = "Sample",value = "ABS") %>%
-  select(X2,sample,ABS) %>%
-  mutate(RSD = AA_RSD$RSD)
+AA_std <- filter(AA_Data, `Sample Key` == "Sample Blank"|`Sample Key` == "check10")
+view(AA_std)
 
-AA_merged <- merge(AA_tidy,Sample_Key)
-view(AA_merged)
-  
-
+write.csv(AA_merged, file = "~/CHEM313_Miller/ICPMS_metals_miller/data/tidy_AA.csv")
  
 ```
 
