@@ -62,10 +62,15 @@ view(AA_Data)
 AA_merged <- merge(AA_Data,Sample_Key)
 view(AA_merged) ### note to self: this should produce 65 observations if everything is retained properly
 
-AA_std <- filter(AA_Data, `Sample Key` == "Sample Blank"|`Sample Key` == "check10")
+AA_checks <- filter(AA_Data, `Sample Key` == "Sample Blank"|`Sample Key` == "check10")
 view(AA_std)
 
 write.csv(AA_merged, file = "~/CHEM313_Miller/ICPMS_metals_miller/data/tidy_AA.csv")
+write.csv(AA_checks, file = "~/CHEM313_Miller/ICPMS_metals_miller/data/checks_AA.csv")
  
 ```
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
