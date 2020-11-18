@@ -1,12 +1,16 @@
 ---
 title: "ICPMS_data_analysis"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=TRUE}
 knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+library(tidyverse)
 
-sample_sites <- unique(filter(ICPMS_tidy_example,site!="MB",site!="QC")$site)
+sample_sites <- unique(filter(ICPMS_tidy_example,site!="MB")$site)
 metals_analyzed <- unique(ICPMS_tidy_example$metal)
 
 ICPMS_cal <- NULL
@@ -40,6 +44,7 @@ remove(equation,cal,slope,slope_std,intercept,intercept_std)
 
 
 ```
+
 
 ```{r setup, include=TRUE}
 sample_analysis <- function(unique_site) {
@@ -114,11 +119,11 @@ uncor_sample
 sample_data_mb <- NULL
 
 for(unique_metal in metals_analyzed) {
-  MB_metal <- filter(MB, metal == unique_metal)
+  MB_metal <- filter(MB, metal==unique_metal)
   sample_metal <- filter(uncor_sample,metal==unique_metal)
   conc_dil_blanked <- sample_metal$conc_dil-MB_metal$conc_dil
   
-  conc_dil_blanked_error <- sqrt((sample_metal$conc_dil_eror)^2+(MB_metal$conc_dil_error)^2)
+  conc_dil_blanked_error <- sqrt((sample_metal$conc_dil_error)^2+(MB_metal$conc_dil_error)^2)
   
   sample_data_mb <- sample_metal %>%
     mutate(conc_dil_blanked,conc_dil_blanked_error)%>%
@@ -126,5 +131,75 @@ for(unique_metal in metals_analyzed) {
 }
 sample_data_mb
 ```
+### Sample prep procedure
 
+```{r}
+#error prop
+vol_e <- 1
+mass_e <- 0.001
+dil_1010_e <- sqrt(1^2+10^2)
+dil_e <- sqrt((dil_1010_e/1010)^2+(1/10)^2)
+
+sample_merge <-merge(ICPMS_tidy_example,sample_data_mb)%>%
+  unique()%>%
+  mutate(conc_blanked = conc_dil_blanked*(total_volume/1000)/(mass_of_soil/1000)*101,
+         
+         conc_blanked_error= conc_blanked*
+           sqrt((conc_dil_blanked_error/conc_dil_blanked)^2+
+                  (dil_e/101)^2+
+                  (mass_e/mass_of_soil)^2+
+                  (vol_e/total_volume)^2),
+         conc_blanked= conc_dil*(total_volume/1000)/(mass_of_soil/1000)*101,
+         conc_blanked_error= conc_blanked*
+           sqrt((conc_dil_error/101)^2+
+                  (mass_e/mass_of_soil)^2+
+                  (vol_e/total_volume)^2))%>%
+  select(-concentration,
+         -type,
+         -total_volume,
+         -cps,
+         -rsd,
+         -conc_dil_blanked,
+         -conc_dil_blanked_error, -conc_dil,
+         -conc_dil_error)
+
+ICP_statistics <- sample_merge %>%
+  group_by(site, metal) %>%
+  filter(site != "QC")  %>%
+  summarize(mean_conc = mean(conc_blanked),
+            sd_conc = sd(conc_blanked),
+            n = n()) %>%
+  mutate(se = qnorm(0.975)*sd_conc/sqrt(n),
+         lower_ci = mean_conc - se,
+         upper_ci = mean_conc + se, 
+         mass_frac = mean_conc/1000) %>%
+ select(-n,
+         -se)
+view(ICP_statistics)
+
+qc <- sample_merge %>%
+  group_by(metal) %>%
+  filter(site == "QC")  %>%
+  summarize(mean_conc = mean(conc_blanked),
+            sd_conc = sd(conc_blanked),
+            n = n()) %>%
+  mutate(se = qnorm(0.975)*sd_conc/sqrt(n),
+         lower_ci = mean_conc - se,
+         upper_ci = mean_conc + se, 
+         mass_frac = mean_conc/1000) %>%
+ select(-n,
+         -se)
+view(qc)
+
+
+ICP_statistics %>%
+ggplot(aes(x = metal, y = mass_frac, color =
+site)) +
+geom_point() +
+geom_errorbar(aes(ymin=mean_conc - se,
+ymax=mean_conc + se)) +
+labs(x = "Metal",
+     y = "Concentration of Metal",
+     title = "Metal Concentrations by Site, ICP-MS")
+```
 

@@ -1,0 +1,190 @@
+---
+title: "AA_data_analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(readr)
+```
+
+```{r, warning=FALSE}
+tidy_aa <- read.csv("~/CHEM313_Miller/ICPMS_metals_miller/data/tidy_AA.csv") %>%
+  mutate(rsd = as.numeric(percent_rsd)*100)
+```
+
+```{r}
+cal <- tidy_aa %>%
+    filter(type != "Sample",rsd != "")%>%
+    select(mean_abs, rsd, concentration)
+
+  
+w<- 1/(cal$mean_abs*cal$rsd)^2
+model <- lm(cal$mean_abs ~ cal$concentration, weights = w)
+
+slope<- model$coefficients[2]
+intercept<- model$coefficients[1]
+slope_std <-summary(model)$coefficients[2,2]
+intercept_std<- summary(model)$coefficients[1,2]
+
+plot(cal$mean_abs~ cal$concentration,
+     xlab= paste("Concentration of Cr (ppb)"),
+ylab= "mean absorbance")+
+  abline(model,col="red")+
+  title(paste("AA Calibration for Cr"))
+     
+equation <-  tibble(metal = "Cr53",slope,slope_std,intercept,intercept_std)
+cal_aa <- rbind(equation)
+cal_aa
+
+```
+
+```{r}
+sample_sites <- unique(filter(tidy_aa, site != "MB", site != "")$site)
+sample_analysis <- function(unique_site){
+concentration_data <- NULL
+  sample <- filter(tidy_aa,site == unique_site) 
+  data <- NULL
+  
+  for(ID in sample$sample_key){
+    sample_data <- filter(sample, sample_key == ID)
+    cal <- cal_aa
+
+    m <- cal$slope
+    b <- cal$intercept
+    y <- sample_data$mean_abs
+      
+    b_e <- cal$intercept_std
+    m_e <- cal$slope_std
+      
+    x <- (y-b)/m
+      
+      RSD <- ((sample_data$rsd/100)*sample_data$mean_abs)
+      ABS <- sample_data$mean_abs
+      
+      #sample propagation
+      e_yb <- sqrt((RSD)^2+(b_e)^2)
+      #error in y-b from the calibration
+      yb <- ABS-b
+      e_x <- x*sqrt((e_yb/yb)^2+(m_e/m)^2)
+      #error in x from the calibration
+      data <- rbind(data,data_frame(sample_key = ID,x,e_x))
+      
+      if(unique_site != "MB"){
+        concentration_data <- data_frame(sample_key = sample_data$sample_key,
+                                         analyst = sample_data$analyst,
+                                         metal = "Cr53",
+                                         site = unique_site,
+                                         conc_dil = x,
+                                         conc_dil_error = e_x) %>%
+          rbind(concentration_data)
+    }
+      if(unique_site=="MB"){
+        x <- mean(data$x)
+        e_x <- sd(data$x)
+        concentration_data <- data_frame(metal = "Cr53",
+                                       site = unique_site,
+                                       conc_dil = x,
+                                       conc_dil_error = e_x) %>%
+          rbind(concentration_data)
+      }
+}
+  return(concentration_data)
+}
+```
+
+```{r}
+#output a data frame with the function outputs from each site
+run_sites <- function(Function){
+  value <- NULL
+  for (site in sample_sites){
+    site_value <- Function(site)
+    value <- rbind(site_value, value)
+  }
+  return(value)
+}
+```
+
+```{r}
+MB <- sample_analysis("MB")
+MB
+
+uncor_sample <- run_sites(sample_analysis)
+uncor_sample
+```
+
+```{r}
+sample_data_mb<- NULL
+  conc_dil_blanked<- uncor_sample$conc_dil-MB$conc_dil
+  conc_dil_blanked_error<- sqrt((uncor_sample$conc_dil_error)^2+(MB$conc_dil_error)^2)
+  
+  sample_data_mb<- uncor_sample%>%
+    mutate(conc_dil_blanked, conc_dil_blanked_error)%>%
+    rbind(sample_data_mb)
+sample_data_mb
+```
+
+```{r}
+#error propigation
+vol_e<- 1
+mass<- .001
+dil_1010_e <- sqrt(1^2+10^2)
+dil_e<- sqrt((dil_1010_e/1010)^2+(1/10)^2)
+#correcting things and propigate more error
+
+sample_data<-merge(tidy_aa,sample_data_mb)%>%
+  unique()%>%
+  mutate(conc_blanked = conc_dil_blanked*(total_volume/1000)/(mass_of_soil/1000)*101,
+         
+         conc_blanked_error= conc_blanked*
+           sqrt((conc_dil_blanked_error/conc_dil_blanked)^2+
+                  (dil_e/101)^2+
+                  (mass_e/mass_of_soil)^2+
+                  (vol_e/total_volume)^2),
+         conc_blanked= conc_dil*(total_volume/1000)/(mass_of_soil/1000)*101,
+         conc_blanked_error= conc_blanked*
+           sqrt((conc_dil_error/101)^2+
+                  (mass_e/mass_of_soil)^2+
+                  (vol_e/total_volume)^2))%>%
+   select(-concentration,
+         -type,
+         -mass_of_soil,
+         -total_volume,
+         -mean_abs,
+         -percent_rsd,
+         -conc_dil_blanked,
+         -conc_dil_blanked_error,
+         -conc_dil,
+         -conc_dil_error)
+
+AA_statistics <- sample_data %>%
+  filter(site != "QC") %>%
+  group_by(site) %>%
+  summarize(mean_conc = mean(conc_blanked),
+            sd_conc = sd(conc_blanked),
+            n = n()) %>%
+  mutate(se = qnorm(0.975)*sd_conc/sqrt(n),
+         lower_ci = mean_conc - se,
+         upper_ci = mean_conc + se,
+mass_frac = mean_conc/1000) %>%
+  select(-n,-se,-)
+
+view(AA_statistics)
+
+AA_qc <- sample_data %>%
+  summarize(mean_conc = mean(conc_blanked),
+            sd_conc = sd(conc_blanked),
+            n = n()) %>%
+  mutate(se = qnorm(0.975)*sd_conc/sqrt(n),
+         lower_ci = mean_conc - se,
+         upper_ci = mean_conc + se, 
+         mass_frac = mean_conc/1000) %>%
+  select(-n,-se)
+AA_qc
+```
+
+
